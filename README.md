@@ -10,4 +10,8 @@
 
 3. Add MAC addresses: `whoishome --add Jack=DE:FA:CE:D1:23:45`
 
-4. Run it: `whoishome`
+4. Learn more about how to use it: `whoishome --help`
+
+5. Run it: `whoishome --subnet 192.168.0.1/24`
+
+<img src="https://raw.githubusercontent.com/jackeown/whoIsHome/main/screenshot.jpg">
