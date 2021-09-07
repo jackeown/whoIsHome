@@ -1,0 +1,141 @@
+#!/usr/bin/env python
+
+from subprocess import run
+from random import choice, seed
+from os.path import expanduser, exists
+from collections import defaultdict
+from time import sleep
+import pickle
+import re
+import sys
+
+from rich.progress import track
+from rich import print
+from rich.panel import Panel
+from rich.console import Console
+
+import argparse
+parser = argparse.ArgumentParser("whosHome.py", """
+    Check who is home using python and nmap!
+    The storage is really just a pickled defaultdict mapping names to lists of mac addresses. 
+    This means it would be pretty easy to automatically generate this info from some other source too.
+    """)
+parser.add_argument("--subnet", default="10.0.0.0/24")
+parser.add_argument("--sleepTime", type=int, default=15, help="how many seconds between nmap calls. Beware that nmap is a beast...")
+parser.add_argument("--add", help="add people and mac addresses like `--add Steve=11:22:33:44:55:66`")
+parser.add_argument("--remove", help="remove people like `--remove Steve` or remove MAC addresses like `--remove 11:22:33:44:55:66`")
+parser.add_argument("--storageLocation", default=expanduser("~/.whosHome.pkl"), help="this could be used to have multiple `homes`")
+args = parser.parse_args()
+
+def colorGen():
+    r,g,b = 100, 150, 50
+    while True:
+        funcs = [
+            lambda r,g,b: (255-r, g, b),
+            lambda r,g,b: (r, 255-g, b),
+            lambda r,g,b: (r, g, 255-b),
+            lambda r,g,b: (r + 100, g, b),
+            lambda r,g,b: (r + 100, g, b),
+            lambda r,g,b: (r + 100, g, b)
+        ]
+        r,g,b = choice(funcs)(r,g,b)
+        r,g,b = r%256, g%256, b%256
+        yield f"rgb({r},{g},{b})"
+
+def loadPeople():
+    if exists(args.storageLocation):
+        with open(args.storageLocation, "rb") as f:
+            people = pickle.load(f)
+    else:
+        people = defaultdict(list)
+    
+    return people
+
+def savePeople(people):
+    with open(args.storageLocation, "wb") as f:
+        pickle.dump(people, f)
+
+
+# Get MAC Addresses on the Network.
+def findMacs():
+    p = run(f"sudo nmap -sP {args.subnet}", shell=True, capture_output=True)
+    output = p.stdout.decode("utf8").upper()
+    macs = [x[0] for x in re.findall(r"(([0-9A-f]{2}:){5}[0-9A-f]{2})", output)]
+    return macs, output
+
+c = Console()
+def printPanels(foundStr, unfoundStr, unknownStr, extraStr):
+    c.clear()
+    print(Panel(foundStr, title="People Found", border_style="red"))
+    print(Panel(unfoundStr, title="People NOT Found", border_style="green"))
+    print(Panel(unknownStr, title="Unknown MAC Addresses", border_style="purple"))
+    print(Panel(extraStr, title="Extra Info", border_style="blue"))
+
+
+people = loadPeople()
+
+if args.add:
+    name, mac = args.add.split("=")
+    mac = mac.upper()
+    if mac not in people[name]:
+        people[name].append(mac)
+    savePeople(people)
+    sys.exit()
+
+if args.remove:
+    if re.match(r"(([0-9A-f]{2}:){5}[0-9A-f]{2})", args.remove):
+        for person in people.values():
+            args.remove = args.remove.upper()
+            if args.remove in person:
+                person.remove(args.remove)
+    elif args.remove in people:
+        del people[args.remove]
+
+    savePeople(people)
+    sys.exit()
+
+
+
+printPanels("loading :ten_o’clock:", "please be patient :pray:", "nmap takes a long time :poop:", "sorry :broken_heart:")
+
+# main monitoring loop....
+while True:
+    foundStr, unfoundStr, unknownStr, extraStr = "", "", "", ""
+
+    macs, output = findMacs()
+
+    unfound = []
+    # FOUND PEOPLE ####################################
+    seed(0)
+    g = colorGen()
+    for name in sorted(people):
+        color = next(g)
+        personMacs = sorted([mac for mac in people[name] if mac in macs])
+        if personMacs:
+            boldMacs = ", ".join(f"[underline]{m}[/underline]" if m in personMacs else m for m in people[name])
+            foundStr += f"[{color}]{name:<15}[/{color}] [{boldMacs}]\n"
+        else:
+            unfound.append((name, color))
+
+    unknownMacs = [m for m in macs if not any(m in pmacs for pmacs in people.values())]
+
+    # UNFOUND PEOPLE ###################################
+    for name, color in unfound:
+        tmp = ", ".join(people[name])
+        unfoundStr += f"[{color}]{name:<15}[/{color}] [{tmp}]\n"
+
+    # UNKNOWN MAC ADDRESSES ############################
+    if unknownMacs:
+        unknownStr += f"{'Unknown':<15} {unknownMacs}\n"
+
+    # EXTRA INFORMATION #################################
+    extraStr = f"{len(macs)} MACS DETECTED\n"
+    extraStr += re.findall(r"[0-9]+ HOSTS UP", output)[0]
+
+    # ACTUAL PRINT ######################################
+    printPanels(foundStr, unfoundStr, unknownStr, extraStr)
+
+    # SLEEP SO WE DON'T BOMBARD NMAP ####################
+    for i in track(range(args.sleepTime), description="Time till next nmap call starts"):
+        sleep(1)
+        print(".", end='')
