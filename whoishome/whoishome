@@ -15,14 +15,14 @@ from rich.panel import Panel
 from rich.console import Console
 
 import argparse
-parser = argparse.ArgumentParser("whosHome.py", """
+parser = argparse.ArgumentParser("whoishome", """
     Check who is home using python and nmap!
     The storage is really just a pickled defaultdict mapping names to lists of mac addresses. 
     This means it would be pretty easy to automatically generate this info from some other source too.
     """)
 parser.add_argument("--subnet", default="10.0.0.0/24")
 parser.add_argument("--sleepTime", type=int, default=15, help="how many seconds between nmap calls. Beware that nmap is a beast...")
-parser.add_argument("--add", help="add people and mac addresses like `--add Steve=11:22:33:44:55:66`")
+parser.add_argument("--add", help="add people and mac addresses like `--add Steve=11:22:33:44:55:66`. This can also be used to reassign mac addresses to a different person.")
 parser.add_argument("--remove", help="remove people like `--remove Steve` or remove MAC addresses like `--remove 11:22:33:44:55:66`")
 parser.add_argument("--storageLocation", default=expanduser("~/.whosHome.pkl"), help="this could be used to have multiple `homes`")
 args = parser.parse_args()
@@ -48,7 +48,7 @@ def loadPeople():
             people = pickle.load(f)
     else:
         people = defaultdict(list)
-    
+
     return people
 
 def savePeople(people):
@@ -77,8 +77,12 @@ people = loadPeople()
 if args.add:
     name, mac = args.add.split("=")
     mac = mac.upper()
-    if mac not in people[name]:
-        people[name].append(mac)
+
+    for pname in people:
+        if mac in people[pname]:
+            people[pname].remove(mac)
+    people[name].append(mac)
+
     savePeople(people)
     sys.exit()
 
