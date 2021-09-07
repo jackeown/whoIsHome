@@ -14,4 +14,4 @@
 
 5. Run it: `whoishome --subnet 192.168.0.1/24`
 
-<img src="https://raw.githubusercontent.com/jackeown/whoIsHome/main/screenshot.jpg">
+<img src="https://raw.githubusercontent.com/jackeown/whoIsHome/main/screenshot.png">
