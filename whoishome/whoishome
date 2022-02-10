@@ -8,6 +8,8 @@ from time import sleep
 import pickle
 import re
 import sys
+from time import time
+import json
 
 from rich.progress import track
 from rich import print
@@ -21,13 +23,15 @@ parser = argparse.ArgumentParser("whoishome", """
     This means it would be pretty easy to automatically generate this info from some other source too.
     """)
 parser.add_argument("--subnet", default="10.0.0.0/24")
-parser.add_argument("--sleepTime", type=int, default=15, help="how many seconds between nmap calls. Beware that nmap is a beast...")
-parser.add_argument("--add", help="add people and mac addresses like `--add Steve=11:22:33:44:55:66`. This can also be used to reassign mac addresses to a different person.")
-parser.add_argument("--remove", help="remove people like `--remove Steve` or remove MAC addresses like `--remove 11:22:33:44:55:66`")
-parser.add_argument("--storageLocation", default=expanduser("~/.whosHome.pkl"), help="this could be used to have multiple `homes`")
+parser.add_argument("--sleepTime", type=int, default=15, help="How many seconds between nmap calls. Beware that nmap is a beast...")
+parser.add_argument("--add", help="Add people and mac addresses like `--add Steve=11:22:33:44:55:66`. This can also be used to reassign mac addresses to a different person.")
+parser.add_argument("--remove", help="Remove people like `--remove Steve` or remove MAC addresses like `--remove 11:22:33:44:55:66`")
+parser.add_argument("--storageLocation", default=expanduser("~/.whosHome.pkl"), help="This could be used to have multiple `homes`")
+parser.add_argument("--streamStats", help="You can specify a filename to write stats to about the comings and goings of people.")
+parser.add_argument("--viewStats", action="store_true", help="Use this to see a nice visualization of the stats saved by --streamStats")
 args = parser.parse_args()
 
-def colorGen():
+def colorGen(matplotlib=False):
     r,g,b = 100, 150, 50
     while True:
         funcs = [
@@ -40,7 +44,10 @@ def colorGen():
         ]
         r,g,b = choice(funcs)(r,g,b)
         r,g,b = r%256, g%256, b%256
-        yield f"rgb({r},{g},{b})"
+        if matplotlib:
+            yield (r/255, g/255, b/255)
+        else:
+            yield f"rgb({r},{g},{b})"
 
 def loadPeople():
     if exists(args.storageLocation):
@@ -72,6 +79,15 @@ def printPanels(foundStr, unfoundStr, unknownStr, extraStr):
     print(Panel(extraStr, title="Extra Info", border_style="blue"))
 
 
+def streamStats(macs):
+    if "streamStats" not in args:
+        return
+
+    filename = args.streamStats
+    with open(filename, "a") as f:
+        f.write(f"{time()}: {macs}\n")
+
+
 people = loadPeople()
 
 if args.add:
@@ -98,6 +114,77 @@ if args.remove:
     savePeople(people)
     sys.exit()
 
+if args.viewStats:
+    import matplotlib.pyplot as plt
+
+    if "streamStats" not in args:
+        print("When using --viewStats, you must also specify a stats file to view via --streamStats")
+        sys.exit()
+
+    with open(args.streamStats, "r") as f:
+        lines = f.readlines()
+        ts, macs = zip(*[l.split(":", 1) for l in lines])
+        ts = [float(t) for t in ts]
+        macs = [json.loads(mac_list.replace("'", '"')) for mac_list in macs]
+
+
+    # First Plot streaks of known people
+    seed(0)
+    g = colorGen(matplotlib=True)
+    for i, person in enumerate(sorted(people)):
+        color = next(g)
+        mask = [len(people)+1-i if len(set(people[person]).intersection(set(mac_list))) > 0 else 0 for mac_list in macs]
+        
+        label = person
+
+        streak = []
+        for t, val in zip(ts, mask):
+            if val != 0:
+                streak.append((t,val))
+
+            if val == 0 and streak:
+                plt.plot(*zip(*streak), label=label, color=color)
+                label=None
+                streak = []
+
+        if streak:
+            plt.plot(*zip(*streak), label=label, color=color)
+        elif label:
+            plt.plot([],[], label=label, color=color)
+    
+    # Next plot streaks for unknown mac addresses
+    unknownMacs = set()
+    for mac_list in macs:
+        for mac in mac_list:
+            if not any(mac in person_macs for person_macs in people.values()):
+                unknownMacs.add(mac)
+
+    for i, mac in enumerate(unknownMacs):
+        color = next(g)
+        label = mac
+        mask = [-i if mac in mac_list else 0 for mac_list in macs]
+        
+        streak = []
+        for t, val in zip(ts, mask):
+            if val != 0:
+                streak.append((t,val))
+
+            if val == 0 and streak:
+                plt.plot(*zip(*streak), label=label, color=color)
+                label=None
+                streak = []
+
+        if streak:
+            plt.plot(*zip(*streak), label=label, color=color)
+        elif label:
+            plt.plot([],[], label=label, color=color)
+
+        
+    plt.legend()
+    plt.show()
+
+    sys.exit()
+
 
 
 printPanels("loading :ten_o’clock:", "please be patient :pray:", "nmap takes a long time :poop:", "sorry :broken_heart:")
@@ -106,7 +193,9 @@ printPanels("loading :ten_o’clock:", "please be patient :pray:", "nmap takes a
 while True:
     foundStr, unfoundStr, unknownStr, extraStr = "", "", "", ""
 
+    print("running nmap")
     macs, output = findMacs()
+    print("finished running nmap")
 
     unfound = []
     # FOUND PEOPLE ####################################
@@ -138,6 +227,9 @@ while True:
 
     # ACTUAL PRINT ######################################
     printPanels(foundStr, unfoundStr, unknownStr, extraStr)
+
+    # STREAM STATISTICS #################################
+    streamStats(macs)
 
     # SLEEP SO WE DON'T BOMBARD NMAP ####################
     for i in track(range(args.sleepTime), description="Time till next nmap call starts"):
