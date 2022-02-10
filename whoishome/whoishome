@@ -80,11 +80,10 @@ def printPanels(foundStr, unfoundStr, unknownStr, extraStr):
 
 
 def streamStats(macs):
-    if "streamStats" not in args:
+    if args.streamStats is None:
         return
 
-    filename = args.streamStats
-    with open(filename, "a") as f:
+    with open(args.streamStats, "a") as f:
         f.write(f"{time()}: {macs}\n")
 
 
